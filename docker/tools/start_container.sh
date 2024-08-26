@@ -1,4 +1,4 @@
 cd ../..
 docker run --gpus all --rm \
-    -v ./:/workspace/Ultralight-SimplePose \
+    -v ./:/workspace/stair_safety_net \
     -it mxnet_gpu

@@ -17,19 +17,19 @@ class StairSafetyNet(mx.gluon.nn.HybridBlock):
             param.grad_req = 'null'
 
         self.pose_block = posenet
-        self.LSTM_block = mx.gluon.rnn.LSTM(LSTM_layer_size, LSTM_num_layers)
+        self.LSTM_block = mx.gluon.rnn.LSTM(LSTM_layer_size, LSTM_num_layers, input_size=64*48*17)
         self.fc_block = mx.gluon.nn.Dense(2)
 
         self.sequence_len = sequence_len
 
     def hybrid_forward(self, x):
-        if x.shape[0] != self.sequence_len:
-            raise mx.base.MXNetError("Incompatible input shape")
+        if x.shape[0] % self.sequence_len != 0:
+            raise mx.base.MXNetError("Incompatible input shape: first input shape bust be equal batch_size * sequence_len")
         y1 = self.pose_block(x)
-        y2 = y1.reshape(-1, 17, 3072)
+        y2 = y1.reshape(-1, self.sequence_len, 64*48*17)
         y3 = self.LSTM_block(y2)
         y4 = self.fc_block(y3)
-        return mx.nd.softmax(y4[-1])
+        return mx.nd.softmax(y4)
 
 if __name__ == "__main__":
     device=mx.gpu()
