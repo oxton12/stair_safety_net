@@ -20,7 +20,7 @@ def mat_to_mxarray(img, context):
     return input.as_in_context(context)
 
 
-def get_data(path, context):
+def get_data_paths(path, context):
     labeled_paths = {}
     for root, dirs, files in os.walk(path):
         parent = Path(root).name
@@ -34,11 +34,12 @@ def get_data(path, context):
 def evaluate_test(test_videos, detector, net):
     L2 = gluon.loss.L2Loss()
     accuracy = mx.metric.Accuracy()
+    loss = 0
+    counter = 0
     for video_path in test_videos.keys():
         label = test_videos[video_path]
         cap = cv2.VideoCapture(video_path)
         while(cap.isOpened()):
-            loss = 0
             ret, img = cap.read()
             if not ret:
                 break
@@ -48,8 +49,10 @@ def evaluate_test(test_videos, detector, net):
             output = net(detection)
             if output is not None:
                 loss += L2(output, label)
+                counter += 1
                 accuracy.update(label, output)
     _, acc = accuracy.get()
+    loss /= counter
     return acc, loss
 
 
@@ -69,8 +72,8 @@ def train():
     detector.reset_class(["person"], reuse_weights=['person'])
     net = StairSafetyNet(LSTM_layer_size, LSTM_layeres, SEQUENCE_LEN, context=device)
 
-    train_videos = get_data(TRAIN_SET, device)
-    test_videos = get_data(TEST_SET, device)
+    train_videos = get_data_paths(TRAIN_SET, device)
+    test_videos = get_data_paths(TEST_SET, device)
 
     net.initialize(mx.init.Xavier(), ctx=device)
     trainer = gluon.Trainer(net.collect_params(), 'adam', {'learning_rate': lr})
