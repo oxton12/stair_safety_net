@@ -26,7 +26,7 @@ class SequenceAssembler():
         self.step = 1
         self.ended = False
         max_step_by_amount = (self.elements_amount - seq_len) // (seq_len - 1) + 1
-        max_step_hard = 1
+        max_step_hard = 3
         self.max_step = min(max_step_by_amount, max_step_hard)
         if self.max_step < 1:
             self.ended = True
@@ -62,7 +62,6 @@ def normalize(data, mean, std):
     return data
     
 
-
 def get_data_paths(path, context):
     labeled_paths = {}
     for root, dirs, files in os.walk(path):
@@ -74,39 +73,36 @@ def get_data_paths(path, context):
     return labeled_paths
 
 
-def evaluate_test(test_data_paths, net, seq_len):
-    L2 = gluon.loss.L2Loss()
+def evaluate_test(test_data_paths, net, seq_len, mean, std):
+    metric_test = mx.metric.MSE()
     accuracy_test = mx.metric.Accuracy()
-    loss = 0
-    counter = 0
-    for data_path in test_data_paths.keys():
-        data = mx.nd.load(data_path)[0]
-        label = test_data_paths[data_path]
-        for sequence_end_id in range(seq_len, data.shape[0]):
-            sequence = data[sequence_end_id - seq_len : sequence_end_id]
-            reshaped_sequence = sequence.reshape((1, seq_len, 17*64*48))
-            output = net.hybrid_forward(reshaped_sequence)
-            loss += L2(output, label)
-            counter += 1
-            accuracy_test.update(label, output)
+    sequence_assemblers = [SequenceAssembler(data_path, test_data_paths[data_path], seq_len, mean, std) 
+                               for data_path in test_data_paths.keys()]
+    while any(assembler.ended == False for assembler in sequence_assemblers):
+        available_assemblers = [assembler for assembler in sequence_assemblers if assembler.ended == False]
+        selected_assembler = random.choice(available_assemblers)
+        sequence, label = selected_assembler.get_sequence()
+        output = net.hybrid_forward(sequence)
+        accuracy_test.update(label, output)
+        metric_test.update(label, output)
     _, acc = accuracy_test.get()
-    loss /= counter
-    accuracy_test.reset()
-    return acc, loss
+    _, met = metric_test.get()
+    return acc, met
 
 
 def train():
     TRAIN_SET = "ndarray-data/train"
     TEST_SET = "ndarray-data/test"
     EPOCHS = 200
-    BATCH_SIZE = 8
+    BATCH_SIZE = 32
     SEQUENCE_LEN = 16
     lr = 0.0004
     epsilon = 2e-07
-    LSTM_layer_size = 64
-    LSTM_num_layeres = 2
+    LSTM_layer_size = 128
+    LSTM_num_layeres = 3
     dropout = 0
-    log_interval = 100
+    weight_decay = 0
+    log_interval = 50
 
     device = mx.gpu()
     net = StairSafetyNetLSTM(LSTM_layer_size, LSTM_num_layeres, dropout, SEQUENCE_LEN)
@@ -115,15 +111,16 @@ def train():
     test_data_paths = get_data_paths(TEST_SET, device)
 
     mean, std = get_mean_std(train_data_paths)
-    normalizer = mx.gluon.data.vision.transforms.Normalize(mean, std)
 
     net.initialize(mx.init.Xavier(), ctx=device)
-    trainer = gluon.Trainer(net.collect_params(), 'adam', {'learning_rate': lr, 'epsilon': epsilon})
+    trainer = gluon.Trainer(net.collect_params(), 'adam', {'learning_rate': lr, 'epsilon': epsilon, 'wd': weight_decay})
+    metric = mx.metric.MSE()
     L2 = gluon.loss.L2Loss()
     accuracy = mx.metric.Accuracy()
 
     for epoch in range(EPOCHS):
         accuracy.reset()
+        metric.reset()
         batch_count = 0
         batch = mx.nd.empty((0, SEQUENCE_LEN, 17*64*48), ctx=device)
         label_batch = mx.nd.empty((0, 2), ctx=device)
@@ -150,12 +147,14 @@ def train():
             mx.autograd.backward(loss, retain_graph=True)
             trainer.step(BATCH_SIZE)
             accuracy.update(label_batch, output)
+            metric.update(label_batch, output)
             batch = mx.nd.empty((0, SEQUENCE_LEN, 17*64*48), ctx=device)
             batch_count += 1
 
             if batch_count % log_interval == 0:
                 _, acc = accuracy.get()
-                print(f"""Epoch[{epoch + 1}] Batch[{batch_count}] loss = {mx.nd.mean(loss)} | accuracy = {acc}""")
+                _, met = metric.get()
+                print(f"""Epoch[{epoch + 1}] Batch[{batch_count}] mse = {met} | accuracy = {acc}""")
 
 
         if batch.shape[0] != 0:
@@ -165,11 +164,13 @@ def train():
             mx.autograd.backward(loss)
             trainer.step(batch.shape[0])
             accuracy.update(label_batch, output)
+            metric.update(label_batch, output)
 
         _, acc = accuracy.get()
-        test_acc, test_loss = evaluate_test(test_data_paths, net, SEQUENCE_LEN)
+        _, met = metric.get()
+        test_acc, test_met = evaluate_test(test_data_paths, net, SEQUENCE_LEN, mean, std)
         print(" ")
-        print(f"[Epoch {epoch + 1}] training accuracy={acc} | validation loss={test_loss} | validation accuracy={test_acc}")
+        print(f"[Epoch {epoch + 1}] training mse={met} | validation mse={test_met} | validation accuracy={test_acc}")
         print(" ")
 
     net.save("stair_safety_LSTM_only")
