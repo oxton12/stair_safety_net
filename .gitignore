@@ -1,2 +1,4 @@
 # The build folder
 /__pycache__
+/data
+/ndarray-data

@@ -8,10 +8,10 @@ class StairSafetyNetLSTM(mx.gluon.nn.HybridBlock):
         super().__init__()
         #self.norm_block = mx.gluon.nn.LayerNorm(axis=2)
         self.LSTM_block = mx.gluon.rnn.LSTM(LSTM_layer_size, LSTM_num_layers, input_size=64*48*17, dropout=dropout_rate, layout='NTC')
-        self.fc_block_1 = mx.gluon.nn.Dense(8, activation="relu")
-        self.fc_block_2 = mx.gluon.nn.Dense(2)
-
-        self.fc_block_2.weight.wd_mult = 0
+        self.fc_block_1 = mx.gluon.nn.Dense(64, activation="relu")
+        self.fc_block_2 = mx.gluon.nn.Dense(32, activation="relu")
+        self.fc_block_3 = mx.gluon.nn.Dense(16, activation="relu")
+        self.fc_block_4 = mx.gluon.nn.Dense(2)
 
         self.sequence_len = sequence_len
 
@@ -20,7 +20,9 @@ class StairSafetyNetLSTM(mx.gluon.nn.HybridBlock):
         y1 = self.LSTM_block(x)
         y2 = self.fc_block_1(y1)
         y3 = self.fc_block_2(y2)
-        return y3
+        y4 = self.fc_block_3(y3)
+        y5 = self.fc_block_4(y4)
+        return mx.nd.softmax(y5)
 
 if __name__ == "__main__":
     device=mx.gpu()
